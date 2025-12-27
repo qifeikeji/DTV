@@ -151,7 +151,6 @@ pub async fn search_bilibili_rooms(
     let mut cookie_header = cookie.unwrap_or_default();
 
     let client = reqwest::Client::builder()
-        .no_proxy()
         .build()
         .map_err(|e| format!("Failed to build client: {}", e))?;
 

@@ -17,7 +17,6 @@ pub async fn perform_anchor_search(keyword: &str) -> Result<String, Box<dyn std:
 
     let client = Client::builder()
         .redirect(Policy::limited(10))
-        .no_proxy()
         .default_headers(default_headers)
         .build()?;
 

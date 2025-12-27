@@ -59,8 +59,9 @@ pub async fn get_douyin_live_stream_url_with_quality(
         requested_id, quality
     );
 
-    let http_client = HttpClient::new_direct_connection()
-        .map_err(|e| format!("Failed to create direct connection HttpClient: {}", e))?;
+    // 使用默认 HTTP 客户端（遵循 HTTP(S)_PROXY 环境变量）
+    let http_client =
+        HttpClient::new().map_err(|e| format!("Failed to create HttpClient: {}", e))?;
 
     let normalized_id = normalize_douyin_live_id(&requested_id);
     let DouyinRoomData { room } = fetch_room_data(&http_client, &normalized_id, None).await?;

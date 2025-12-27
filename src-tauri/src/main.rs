@@ -147,10 +147,26 @@ async fn search_anchor(keyword: String) -> Result<String, String> {
 
 // Main function corrected
 fn main() {
+    // 默认启用 HTTP 代理（仅在用户未显式设置环境变量时注入），便于在受限网络环境中直接测试。
+    // 你可以通过提前设置 HTTP_PROXY / HTTPS_PROXY 覆盖此默认值。
+    const DEFAULT_HTTP_PROXY: &str = "http://192.168.1.1:8118";
+    if env::var("HTTP_PROXY").is_err() && env::var("http_proxy").is_err() {
+        env::set_var("HTTP_PROXY", DEFAULT_HTTP_PROXY);
+    }
+    if env::var("HTTPS_PROXY").is_err() && env::var("https_proxy").is_err() {
+        env::set_var("HTTPS_PROXY", DEFAULT_HTTP_PROXY);
+    }
+    if env::var("ALL_PROXY").is_err() && env::var("all_proxy").is_err() {
+        env::set_var("ALL_PROXY", DEFAULT_HTTP_PROXY);
+    }
+    // 避免代理影响本地回环请求（例如本地 flv/image/hls 代理服务）。
+    if env::var("NO_PROXY").is_err() && env::var("no_proxy").is_err() {
+        env::set_var("NO_PROXY", "127.0.0.1,localhost");
+    }
+
     // Create a new HTTP client instance to be managed by Tauri
     let client = reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-        .no_proxy()
         .build()
         .expect("Failed to create reqwest client");
     let follow_http_client = FollowHttpClient::new().expect("Failed to create follow http client");

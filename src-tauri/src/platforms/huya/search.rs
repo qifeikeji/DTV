@@ -18,7 +18,6 @@ pub async fn search_huya_anchors(
     page: Option<usize>,
 ) -> Result<Vec<HuyaAnchorItem>, String> {
     let client = reqwest::Client::builder()
-        .no_proxy()
         .build()
         .map_err(|e| e.to_string())?;
     let url = "https://search.cdn.huya.com/";

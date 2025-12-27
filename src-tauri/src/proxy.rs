@@ -9,6 +9,7 @@ use std::net::TcpStream;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 use tauri::{AppHandle, State};
+use url::Url;
 
 // Define a struct to hold the server handle in a Tauri managed state
 #[derive(Default)]
@@ -24,6 +25,35 @@ struct ImageQuery {
     url: String,
 }
 
+#[derive(Deserialize)]
+struct HlsQuery {
+    url: String,
+}
+
+fn apply_common_headers(mut req: reqwest::RequestBuilder, url: &str) -> reqwest::RequestBuilder {
+    req = req
+        .header(
+            "User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        )
+        .header("Accept", "*/*")
+        .header("Connection", "keep-alive");
+
+    // Referer/Origin：绕过各平台简单防盗链
+    if url.contains("hdslb.com") || url.contains("bilibili.com") {
+        req = req
+            .header("Referer", "https://live.bilibili.com/")
+            .header("Origin", "https://live.bilibili.com");
+    } else if url.contains("huya.com") || url.contains("hy-cdn.com") || url.contains("huyaimg.com") {
+        req = req
+            .header("Referer", "https://www.huya.com/")
+            .header("Origin", "https://www.huya.com");
+    } else if url.contains("douyin") || url.contains("douyinpic.com") {
+        req = req.header("Referer", "https://www.douyin.com/");
+    }
+    req
+}
+
 async fn image_proxy_handler(
     query: web::Query<ImageQuery>,
     client: web::Data<Client>,
@@ -33,29 +63,10 @@ async fn image_proxy_handler(
         return HttpResponse::BadRequest().body("Missing url query parameter");
     }
 
-    let mut req = client
-        .get(&url)
-        .header(
-            "User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        )
-        .header(
-            "Accept",
-            "image/avif,image/webp,image/apng,image/*;q=0.8,*/*;q=0.5",
-        );
-
-    // Set a Referer to bypass hotlink protections
-    if url.contains("hdslb.com") || url.contains("bilibili.com") {
-        req = req
-            .header("Referer", "https://live.bilibili.com/")
-            .header("Origin", "https://live.bilibili.com");
-    } else if url.contains("huya.com") {
-        req = req
-            .header("Referer", "https://www.huya.com/")
-            .header("Origin", "https://www.huya.com");
-    } else if url.contains("douyin") || url.contains("douyinpic.com") {
-        req = req.header("Referer", "https://www.douyin.com/");
-    }
+    let mut req = apply_common_headers(client.get(&url), &url).header(
+        "Accept",
+        "image/avif,image/webp,image/apng,image/*;q=0.8,*/*;q=0.5",
+    );
 
     match req.send().await {
         Ok(upstream_response) => {
@@ -107,6 +118,132 @@ async fn image_proxy_handler(
             );
             HttpResponse::InternalServerError()
                 .body(format!("Error connecting to upstream IMAGE {}: {}", url, e))
+        }
+    }
+}
+
+fn rewrite_attribute_uri(line: &str, base: &Url) -> String {
+    // 处理常见 tag：#EXT-X-KEY / #EXT-X-MAP 里的 URI="..."
+    let key = "URI=\"";
+    let Some(start) = line.find(key) else {
+        return line.to_string();
+    };
+    let rest = &line[start + key.len()..];
+    let Some(end) = rest.find('"') else {
+        return line.to_string();
+    };
+    let raw_uri = &rest[..end];
+    let resolved = base.join(raw_uri).map(|u| u.to_string()).unwrap_or_else(|_| raw_uri.to_string());
+    let proxied = format!("/hls?url={}", urlencoding::encode(&resolved));
+    let mut out = String::new();
+    out.push_str(&line[..start + key.len()]);
+    out.push_str(&proxied);
+    out.push('"');
+    out.push_str(&rest[end + 1..]);
+    out
+}
+
+async fn hls_proxy_handler(query: web::Query<HlsQuery>, client: web::Data<Client>) -> impl Responder {
+    let url = query.url.clone();
+    if url.is_empty() {
+        return HttpResponse::BadRequest().body("Missing url query parameter");
+    }
+
+    let upstream_url = match Url::parse(&url) {
+        Ok(u) => u,
+        Err(e) => return HttpResponse::BadRequest().body(format!("Invalid url: {}", e)),
+    };
+
+    let req = apply_common_headers(client.get(upstream_url.as_str()), upstream_url.as_str());
+
+    match req.send().await {
+        Ok(upstream_response) => {
+            let status_from_reqwest = upstream_response.status();
+            let content_type = upstream_response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("application/octet-stream")
+                .to_string();
+
+            if !status_from_reqwest.is_success() {
+                let error_text = upstream_response
+                    .text()
+                    .await
+                    .unwrap_or_else(|e| format!("Failed to read error body from upstream: {}", e));
+                let actix_status_code =
+                    actix_web::http::StatusCode::from_u16(status_from_reqwest.as_u16())
+                        .unwrap_or(actix_web::http::StatusCode::INTERNAL_SERVER_ERROR);
+                return HttpResponse::build(actix_status_code).body(format!(
+                    "Error fetching HLS resource from upstream: {}. Status: {}. Details: {}",
+                    url, status_from_reqwest, error_text
+                ));
+            }
+
+            let is_m3u8 = upstream_url
+                .path()
+                .to_ascii_lowercase()
+                .ends_with(".m3u8")
+                || content_type.to_ascii_lowercase().contains("mpegurl")
+                || content_type.to_ascii_lowercase().contains("m3u8");
+
+            if is_m3u8 {
+                let text = match upstream_response.text().await {
+                    Ok(t) => t,
+                    Err(e) => {
+                        eprintln!("[Rust/proxy.rs hls] Failed to read playlist text: {}", e);
+                        return HttpResponse::InternalServerError()
+                            .body(format!("Failed to read playlist text: {}", e));
+                    }
+                };
+
+                let base_for_resolve = upstream_url.clone();
+                let rewritten = text
+                    .lines()
+                    .map(|line| {
+                        let trimmed = line.trim();
+                        if trimmed.is_empty() {
+                            return line.to_string();
+                        }
+                        if trimmed.starts_with('#') {
+                            // tag line: try rewrite URI="..."
+                            return rewrite_attribute_uri(line, &base_for_resolve);
+                        }
+
+                        let resolved = base_for_resolve
+                            .join(trimmed)
+                            .map(|u| u.to_string())
+                            .unwrap_or_else(|_| trimmed.to_string());
+                        format!("/hls?url={}", urlencoding::encode(&resolved))
+                    })
+                    .collect::<Vec<String>>()
+                    .join("\n");
+
+                return HttpResponse::Ok()
+                    .content_type("application/vnd.apple.mpegurl")
+                    .insert_header(("Cache-Control", "no-store"))
+                    .body(rewritten);
+            }
+
+            // 非 m3u8：按二进制流转发（ts/mp4/key 等）
+            let mut response_builder = HttpResponse::Ok();
+            response_builder
+                .content_type(content_type)
+                .insert_header(("Cache-Control", "no-store"));
+
+            let byte_stream = upstream_response.bytes_stream().map_err(|e| {
+                eprintln!("[Rust/proxy.rs hls] Upstream stream error: {}", e);
+                actix_web::error::ErrorInternalServerError(format!("Upstream stream error: {}", e))
+            });
+            response_builder.streaming(byte_stream)
+        }
+        Err(e) => {
+            eprintln!(
+                "[Rust/proxy.rs hls] Failed to send request to upstream {}: {}",
+                url, e
+            );
+            HttpResponse::InternalServerError()
+                .body(format!("Error connecting to upstream HLS {}: {}", url, e))
         }
     }
 }
@@ -232,7 +369,6 @@ pub async fn start_proxy(
         // Create reqwest::Client inside the closure for each worker thread (for images)
         let app_data_reqwest_client = web::Data::new(
             Client::builder()
-                .no_proxy()
                 .http1_only()
                 .gzip(false)
                 .brotli(false)
@@ -250,6 +386,7 @@ pub async fn start_proxy(
             .wrap(actix_cors::Cors::permissive())
             .route("/live.flv", web::get().to(flv_proxy_handler))
             .route("/image", web::get().to(image_proxy_handler))
+            .route("/hls", web::get().to(hls_proxy_handler))
     })
     .keep_alive(Duration::from_secs(120))
     .bind(("127.0.0.1", port))
@@ -301,7 +438,6 @@ pub async fn start_static_proxy_server(
         let app_data_stream_url = stream_url_data_for_actix.clone();
         let app_data_reqwest_client = web::Data::new(
             Client::builder()
-                .no_proxy()
                 .http1_only()
                 .gzip(false)
                 .brotli(false)
@@ -319,6 +455,7 @@ pub async fn start_static_proxy_server(
             .wrap(actix_cors::Cors::permissive())
             .route("/live.flv", web::get().to(flv_proxy_handler))
             .route("/image", web::get().to(image_proxy_handler))
+            .route("/hls", web::get().to(hls_proxy_handler))
     })
     .keep_alive(Duration::from_secs(120))
     .bind(("127.0.0.1", port))

@@ -40,6 +40,32 @@ impl HttpClient {
         })
     }
 
+    /// 限制连接池规模（仍然遵循环境变量代理设置），用于关注刷新等低并发任务
+    pub fn new_limited(max_idle_per_host: usize) -> Result<Self, String> {
+        let mut default_headers = ReqwestHeaderMap::new();
+        default_headers.insert(
+            USER_AGENT,
+            HeaderValue::from_str(DEFAULT_USER_AGENT)
+                .map_err(|e| format!("Invalid default user agent: {}", e))?,
+        );
+
+        let cookie_jar = Arc::new(Jar::default());
+        let client_builder = Client::builder()
+            .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECONDS))
+            .cookie_provider(cookie_jar)
+            .pool_max_idle_per_host(max_idle_per_host)
+            .pool_idle_timeout(Duration::from_secs(FOLLOW_POOL_IDLE_TIMEOUT_SECONDS));
+
+        let inner_client = client_builder
+            .build()
+            .map_err(|e| format!("Failed to build reqwest client: {}", e))?;
+
+        Ok(HttpClient {
+            inner: inner_client,
+            headers: default_headers,
+        })
+    }
+
     /// 创建一个绕过所有代理的直连HTTP客户端
     /// 这个客户端将忽略系统代理设置，直接连接到目标服务器
     pub fn new_direct_connection() -> Result<Self, String> {
@@ -283,8 +309,6 @@ pub struct FollowHttpClient(pub HttpClient);
 
 impl FollowHttpClient {
     pub fn new() -> Result<Self, String> {
-        Ok(Self(HttpClient::new_direct_limited(
-            FOLLOW_POOL_MAX_IDLE_PER_HOST,
-        )?))
+        Ok(Self(HttpClient::new_limited(FOLLOW_POOL_MAX_IDLE_PER_HOST)?))
     }
 }

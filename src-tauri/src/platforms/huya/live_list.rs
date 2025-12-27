@@ -87,7 +87,8 @@ pub async fn fetch_huya_live_list(
         i_page_size
     );
 
-    let client = match HttpClient::new_direct_connection() {
+    // 使用默认 HTTP 客户端（遵循 HTTP(S)_PROXY 环境变量）
+    let client = match HttpClient::new() {
         Ok(c) => c,
         Err(e) => {
             eprintln!("[Huya Backend] Failed to init HTTP client: {}", e);

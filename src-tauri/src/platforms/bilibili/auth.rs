@@ -86,7 +86,6 @@ fn _encode_wbi(
 fn get_wbi_keys(headers: HeaderMap) -> Result<(String, String), reqwest::Error> {
     let client = reqwest::blocking::Client::builder()
         .https_only(true)
-        .no_proxy()
         .build()
         .unwrap();
 
@@ -118,7 +117,6 @@ pub const USER_AGENT: &str =
 pub fn init_uid(headers: HeaderMap) -> (reqwest::StatusCode, String) {
     let client = reqwest::blocking::Client::builder()
         .https_only(true)
-        .no_proxy()
         .build()
         .unwrap();
 
@@ -149,7 +147,6 @@ pub fn init_uid(headers: HeaderMap) -> (reqwest::StatusCode, String) {
 pub fn init_host_server(headers: HeaderMap, room_id: u64) -> (reqwest::StatusCode, String) {
     let client = reqwest::blocking::Client::builder()
         .https_only(true)
-        .no_proxy()
         .build()
         .unwrap();
 

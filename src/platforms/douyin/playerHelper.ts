@@ -78,8 +78,24 @@ export async function fetchAndPrepareDouyinStreamConfig(roomId: string, quality:
       }
     }
 
+    // 关键：把上游流地址写入后端并启动本地转发代理，让 WebView 只访问 127.0.0.1，
+    // 由 Rust 侧去访问真实直播源（并遵循 HTTP(S)_PROXY 代理设置）。
+    let finalStreamUrl = sanitizedStreamUrl;
+    if (streamAvailable && sanitizedStreamUrl && !sanitizedStreamUrl.startsWith('http://127.0.0.1')) {
+      try {
+        await invoke('set_stream_url_cmd', { url: sanitizedStreamUrl });
+        const proxyUrl = await invoke<string>('start_proxy');
+        if (proxyUrl) {
+          finalStreamUrl = proxyUrl;
+          streamType = 'flv';
+        }
+      } catch (proxyError) {
+        console.warn('[DouyinPlayerHelper] start_proxy failed (fallback to upstream url):', proxyError);
+      }
+    }
+
     return {
-      streamUrl: sanitizedStreamUrl,
+      streamUrl: finalStreamUrl,
       streamType: streamType,
       title: result.title,
       anchorName: result.anchor_name,

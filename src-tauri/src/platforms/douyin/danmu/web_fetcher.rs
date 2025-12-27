@@ -47,8 +47,8 @@ pub struct DouyinLiveWebFetcher {
 impl DouyinLiveWebFetcher {
     pub fn new(live_id: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // 使用直连HTTP客户端，绕过所有代理设置
-        let http_client = HttpClient::new_direct_connection()
-            .map_err(|e| format!("Failed to create direct connection HttpClient: {}", e))?;
+        let http_client =
+            HttpClient::new().map_err(|e| format!("Failed to create HttpClient: {}", e))?;
         let normalized_live_id = normalize_douyin_live_id(live_id);
 
         Ok(DouyinLiveWebFetcher {
@@ -399,8 +399,7 @@ pub async fn fetch_douyin_room_info(live_id: String) -> Result<DouyinFollowListR
     );
     let normalized_id = normalize_douyin_live_id(&live_id);
 
-    let http_client = HttpClient::new_direct_connection()
-        .map_err(|e| format!("Failed to create direct connection HttpClient: {}", e))?;
+    let http_client = HttpClient::new().map_err(|e| format!("Failed to create HttpClient: {}", e))?;
 
     let DouyinRoomData { room } = fetch_room_data(&http_client, &normalized_id, None)
         .await

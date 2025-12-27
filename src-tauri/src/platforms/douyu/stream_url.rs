@@ -100,7 +100,6 @@ impl DouYu {
         );
         let client = Client::builder()
             .redirect(Policy::limited(10))
-            .no_proxy()
             .default_headers(default_headers)
             .build()?;
 

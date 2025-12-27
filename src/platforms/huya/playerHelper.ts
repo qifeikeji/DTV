@@ -20,7 +20,20 @@ export async function getHuyaStreamConfig(
       const streamUrl = pickHuyaUrlByQuality(result.flv_tx_urls, quality) || result.flv_tx_urls[0]?.url;
       if (streamUrl) {
         const sanitizedUrl = enforceHttps(streamUrl);
-        return { streamUrl: sanitizedUrl, streamType: inferStreamType(sanitizedUrl) };
+        // 同 Douyu：走本地 flv 代理，让 WebView 不需要直连外网
+        let finalUrl = sanitizedUrl;
+        try {
+          if (!sanitizedUrl.startsWith('http://127.0.0.1')) {
+            await invoke('set_stream_url_cmd', { url: sanitizedUrl });
+            const proxyUrl = await invoke<string>('start_proxy');
+            if (proxyUrl) {
+              finalUrl = proxyUrl;
+            }
+          }
+        } catch (proxyError) {
+          console.warn('[HuyaPlayerHelper] start_proxy failed (fallback to upstream url):', proxyError);
+        }
+        return { streamUrl: finalUrl, streamType: inferStreamType(finalUrl) || 'flv' };
       } else {
         // 无地址按未开播处理
         throw new Error('主播未开播或无法获取直播流');

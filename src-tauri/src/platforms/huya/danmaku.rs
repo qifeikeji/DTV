@@ -21,7 +21,6 @@ async fn fetch_huya_ids(room_id: &str) -> Result<(i64, i64), String> {
         room_id
     );
     let client = reqwest::Client::builder()
-        .no_proxy()
         .build()
         .map_err(|e| e.to_string())?;
     let resp = client
@@ -417,7 +416,6 @@ async fn get_ws_info_tars(room_id_or_url: &str) -> Result<(String, Vec<u8>), Str
     info!("[Huya Danmaku] get_ws_info_tars rid={}", rid);
 
     let client = reqwest::Client::builder()
-        .no_proxy()
         .build()
         .map_err(|e| e.to_string())?;
     let resp_text = client

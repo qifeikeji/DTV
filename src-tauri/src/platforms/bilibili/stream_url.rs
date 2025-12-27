@@ -3,7 +3,7 @@ use serde_json::Value;
 use tauri::{command, AppHandle, State};
 
 use crate::platforms::common::types::StreamVariant;
-use crate::proxy::{start_proxy, ProxyServerHandle};
+use crate::proxy::{start_proxy, start_static_proxy_server, ProxyServerHandle};
 use crate::StreamUrlStore;
 
 #[command]
@@ -64,7 +64,6 @@ pub async fn get_bilibili_live_stream_url_with_quality(
     );
     let client = reqwest::Client::builder()
         .default_headers(headers)
-        .no_proxy()
         .build()
         .map_err(|e| format!("Failed to build client: {}", e))?;
 
@@ -536,11 +535,18 @@ pub async fn get_bilibili_live_stream_url_with_quality(
                 *current_url_in_store = String::new();
             }
 
+            // 将 HLS 转成 localhost 代理地址，避免 WebView 直连外网（由 Rust 侧发起真实请求，并遵循 HTTP(S)_PROXY）。
+            let base = start_static_proxy_server(app_handle, stream_url_store)
+                .await
+                .map_err(|e| format!("Failed to start static proxy server: {}", e))?;
+            let base = base.trim_end_matches('/').to_string();
+            let proxied_hls = format!("{}/hls?url={}", base, urlencoding::encode(&real_url));
+
             Ok(crate::platforms::common::LiveStreamInfo {
                 title: init_json["data"]["title"].as_str().map(|s| s.to_string()),
                 anchor_name: init_json["data"]["uname"].as_str().map(|s| s.to_string()),
                 avatar: None,
-                stream_url: Some(real_url.clone()),
+                stream_url: Some(proxied_hls),
                 status: Some(1),
                 error_message: None,
                 upstream_url: Some(real_url),

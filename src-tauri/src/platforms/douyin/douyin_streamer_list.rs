@@ -87,9 +87,9 @@ pub async fn fetch_douyin_partition_rooms(
 ) -> Result<DouyinLiveListResponse, String> {
     let count: i32 = 15; // Number of items requested per page, explicitly typed as i32
 
-    // 使用直连HTTP客户端，绕过所有代理设置
-    let local_client = HttpClient::new_direct_connection()
-        .map_err(|e| format!("Failed to create direct connection HttpClient: {}", e))?;
+    // 使用默认 HTTP 客户端（遵循 HTTP(S)_PROXY 环境变量）
+    let local_client =
+        HttpClient::new().map_err(|e| format!("Failed to create HttpClient: {}", e))?;
 
     // Use hardcoded ttwid and odin_tt from the user's working test for now
     let hardcoded_odin_tt = "54c68ba8fa8ce792ad017c55272d171c283baedc87b2f6282ca8706df295cbd89c5d55449b587b7ebe0a2e352e394a86975955c9ed7f98f209996bdca2749479619aceecc7b75c2374e146b5a722b2e1";
