@@ -147,6 +147,14 @@ async fn search_anchor(keyword: String) -> Result<String, String> {
 
 // Main function corrected
 fn main() {
+    // 在 Flatpak/AppImage 这类受控运行环境中，GIO 的 libproxy 模块有时会因为
+    // libcurl/nghttp2 版本不匹配而崩溃（例如缺少 nghttp2_option_set_* 符号）。
+    // 这里默认强制使用 dummy 代理解析器，避免加载 /usr/lib/.../gio/modules/libgiolibproxy.so。
+    // 我们自己的 Rust 网络请求仍然遵循 HTTP(S)_PROXY 环境变量。
+    if env::var("GIO_USE_PROXY_RESOLVER").is_err() {
+        env::set_var("GIO_USE_PROXY_RESOLVER", "dummy");
+    }
+
     // 默认启用 HTTP 代理（仅在用户未显式设置环境变量时注入），便于在受限网络环境中直接测试。
     // 你可以通过提前设置 HTTP_PROXY / HTTPS_PROXY 覆盖此默认值。
     const DEFAULT_HTTP_PROXY: &str = "http://192.168.1.1:8118";
